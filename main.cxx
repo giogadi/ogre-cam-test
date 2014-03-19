@@ -40,13 +40,13 @@ CameraProperties loadCameraProperties(const std::string& cameraFilename)
   cv::FileStorage fs(cameraFilename, cv::FileStorage::READ);
   if (!fs.isOpened())
     throw std::runtime_error("Error in opening camera file!");
-  fs["image_Width"] >> prop.w;
-  fs["image_Height"] >> prop.h;
-  fs["Camera_Matrix"] >> prop.cameraMat;
-  fs["Distortion_Coefficients"] >> prop.distCoeffs;
-  fs["board_Width"] >> prop.boardSize.width;
-  fs["board_Height"] >> prop.boardSize.height;
-  fs["square_Size"] >> prop.squareSize;
+  fs["image_width"] >> prop.w;
+  fs["image_height"] >> prop.h;
+  fs["camera_matrix"] >> prop.cameraMat;
+  fs["distortion_coefficients"] >> prop.distCoeffs;
+  fs["board_width"] >> prop.boardSize.width;
+  fs["board_height"] >> prop.boardSize.height;
+  fs["square_size"] >> prop.squareSize;
   fs.release();
 
   return prop;
@@ -133,10 +133,10 @@ Ogre::Camera* initScene(const WebcamBackground& bg)
   node = sceneMgr->getRootSceneNode()->createChildSceneNode("Cube", Ogre::Vector3::ZERO);
   node->attachObject(cube);
   float offset = bg.properties.squareSize / 2.0;
-  /*node->scale(0.01f * bg.properties.squareSize * Ogre::Vector3::UNIT_SCALE);
-  node->translate(offset + 6*bg.properties.squareSize, offset + 4*bg.properties.squareSize, -offset);*/
-  node->translate(offset, 0.18f - offset, -0.13f + offset);
-  node->scale(0.01f * 0.03f * Ogre::Vector3::UNIT_SCALE);
+  node->scale(0.01f * bg.properties.squareSize * Ogre::Vector3::UNIT_SCALE);
+  node->translate(offset + 6*bg.properties.squareSize, offset + 4*bg.properties.squareSize, -offset);
+  //node->translate(offset, 0.18f - offset, -0.13f + offset);
+  //node->scale(0.01f * 0.03f * Ogre::Vector3::UNIT_SCALE);
 
   // Lights
   sceneMgr->setAmbientLight(Ogre::ColourValue(0.1f, 0.1f, 0.1f, 1.0f));
