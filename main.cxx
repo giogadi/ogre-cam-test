@@ -203,7 +203,7 @@ void updateCameraPositionFromChessboard(const WebcamBackground& bg, const cv::Ma
     // Perform pose estimation (origin w.r.t. webcam)
     cv::Mat w_R_o;
     cv::Mat w_p_o;
-    cv::solvePnP(worldPoints, imgPoints, bg.properties.cameraMat, bg.properties.distCoeffs,
+    cv::solvePnP(worldPoints, imgPoints, bg.properties.cameraMat, cv::Mat::zeros(4,1,CV_32F),
                  w_R_o, w_p_o, false, cv::EPNP);
 
     // Get the inverse transformation (webcam w.r.t. origin)
