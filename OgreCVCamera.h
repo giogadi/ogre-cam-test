@@ -1,5 +1,9 @@
 namespace OgreCV
 {
+  enum CheckerDirection { PLUS_X, MINUS_X, PLUS_Y, MINUS_Y, PLUS_Z, MINUS_Z };
+
+  void updateOgreCameraFromCVExtrinsics(const cv::Mat& w_R_o, const cv::Mat& w_p_o, Ogre::Camera* camera);
+
   struct WebcamProperties
   {
     int w;
@@ -47,6 +51,114 @@ namespace OgreCV
       camera->setCustomProjectionMatrix(true, PM);
 
       return camera;
+    }
+
+    void undistort(cv::InputArray src, cv::OutputArray dst) const
+    {
+      cv::undistort(src, dst, this->cameraMat, this->distCoeffs);
+    }
+
+    void generate3DCheckerboard(const cv::Point3d& startPoint, 
+                                CheckerDirection rowDirection, CheckerDirection colDirection,
+                                std::vector<cv::Point3d>* worldPoints) const
+    {
+      worldPoints->clear();
+      for (int r = 0; r < this->boardSize.height; ++r)
+        for (int c = 0; c < this->boardSize.width; ++c)
+        {
+          cv::Point3d p(startPoint);
+          switch (colDirection)
+          {
+          case PLUS_X:
+            p.x += c*this->squareSize;
+            break;
+          case MINUS_X:
+            p.x += -c*this->squareSize;
+            break;
+          case PLUS_Y:
+            p.y += c*this->squareSize;
+            break;
+          case MINUS_Y:
+            p.y += -c*this->squareSize;
+            break;
+          case PLUS_Z:
+            p.z += c*this->squareSize;
+            break;
+          case MINUS_Z:
+            p.z += -c*this->squareSize;
+            break;
+          }
+
+          switch (rowDirection)
+          {
+          case PLUS_X:
+            p.x += r*this->squareSize;
+            break;
+          case MINUS_X:
+            p.x += -r*this->squareSize;
+            break;
+          case PLUS_Y:
+            p.y += r*this->squareSize;
+            break;
+          case MINUS_Y:
+            p.y += -r*this->squareSize;
+            break;
+          case PLUS_Z:
+            p.z += r*this->squareSize;
+            break;
+          case MINUS_Z:
+            p.z += -r*this->squareSize;
+            break;
+          }
+
+          worldPoints->push_back(p);
+        }
+    }
+
+    bool updateOgreCameraFromCheckerboardImg(cv::InputArray undistortedImg,
+                                             const cv::Point3d& checkerStartCorner,
+                                             CheckerDirection rowDirection, CheckerDirection colDirection,
+                                             Ogre::Camera* camera) const
+    {
+      cv::Mat w_R_o, w_p_o;
+      if (this->extrinsicsFromCheckerboardImg(undistortedImg, checkerStartCorner, rowDirection, colDirection, w_R_o, w_p_o))
+      {
+        updateOgreCameraFromCVExtrinsics(w_R_o, w_p_o, camera);
+        return true;
+      }
+      else
+        return false;
+    }
+
+    // Extrinsics of camera. Given an undistorted image of a checkerboard,
+    // where columns of the checker board progress in +x and rows progress in +y.
+    // Returns true if a checkerboard was found and the output arrays have been populated.
+    bool extrinsicsFromCheckerboardImg(cv::InputArray undistortedImg,
+                                       const cv::Point3d& checkerStartCorner,
+                                       CheckerDirection rowDirection, CheckerDirection colDirection,
+                                       cv::OutputArray w_R_o, cv::OutputArray w_p_o) const
+    {
+      std::vector<cv::Point2f> imgPoints;
+      bool chessboardFound = cv::findChessboardCorners(undistortedImg, this->boardSize, imgPoints,
+                                                       CV_CALIB_CB_ADAPTIVE_THRESH | CV_CALIB_CB_FAST_CHECK | CV_CALIB_CB_NORMALIZE_IMAGE);
+      if (chessboardFound)
+      {
+        // Improve accuracy
+        cv::Mat viewGray;
+        cv::cvtColor(undistortedImg, viewGray, cv::COLOR_BGR2GRAY);
+        cv::cornerSubPix(viewGray, imgPoints, cv::Size(11,11),
+                         cv::Size(-1,-1), cv::TermCriteria( CV_TERMCRIT_EPS+CV_TERMCRIT_ITER, 30, 0.1 ));
+
+        // Generate positions of chessboard corners with top-left corner at (0,0,0)
+        std::vector<cv::Point3d> worldPoints;
+        this->generate3DCheckerboard(checkerStartCorner, rowDirection, colDirection, &worldPoints);
+
+        // Perform pose estimation (origin w.r.t. webcam)
+        cv::solvePnP(worldPoints, imgPoints, this->cameraMat, cv::Mat::zeros(4,1,CV_32F),
+                     w_R_o, w_p_o);
+      }
+
+      return chessboardFound;
     }
   };
 

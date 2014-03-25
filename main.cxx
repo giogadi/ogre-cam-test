@@ -36,15 +36,13 @@ void initScene(const std::string& sceneMgrName, Ogre::Camera* camera, OgreCV::Og
 
   // Add prop cube to scene
   Ogre::Entity* cube = sceneMgr->createEntity("Cube", Ogre::SceneManager::PT_CUBE);
-  cube->setMaterial(boxMaterial);
+  //cube->setMaterial(boxMaterial);
   node = sceneMgr->getRootSceneNode()->createChildSceneNode("Cube", Ogre::Vector3::ZERO);
   node->attachObject(cube);
   float offset = camProps.squareSize / 2.0;
   node->scale(0.01f * camProps.squareSize * Ogre::Vector3::UNIT_SCALE);
   node->translate(offset, offset, -offset);
-  //node->translate(offset + 6*bg.properties.squareSize, offset + 4*bg.properties.squareSize, -offset);
-  //node->translate(offset, 0.195f - offset, -0.23f + offset);
-  //node->scale(0.01f * 0.03f * Ogre::Vector3::UNIT_SCALE);
+  //node->translate(-offset, offset, offset);
 
   // Lights
   sceneMgr->setAmbientLight(Ogre::ColourValue(0.1f, 0.1f, 0.1f, 1.0f));
@@ -58,35 +56,6 @@ void initScene(const std::string& sceneMgrName, Ogre::Camera* camera, OgreCV::Og
   light->setType(Ogre::Light::LightTypes::LT_POINT);
   light->setPosition(-1.0f, 0.0f, -1.0f);
   light->setDiffuseColour(1.0f, 1.0f, 1.0f);
-}
-
-void updateCameraPositionFromChessboard(const cv::Mat& undistortedImg, const OgreCV::WebcamProperties& camProps, Ogre::Camera* cam)
-{
-  std::vector<cv::Point2f> imgPoints;
-  bool chessboardFound = cv::findChessboardCorners(undistortedImg, camProps.boardSize, imgPoints,
-                                                   CV_CALIB_CB_ADAPTIVE_THRESH | CV_CALIB_CB_FAST_CHECK | CV_CALIB_CB_NORMALIZE_IMAGE);
-  if (chessboardFound)
-  {
-    // Improve accuracy
-    cv::Mat viewGray;
-    cv::cvtColor(undistortedImg, viewGray, cv::COLOR_BGR2GRAY);
-    cv::cornerSubPix(viewGray, imgPoints, cv::Size(11,11),
-                     cv::Size(-1,-1), cv::TermCriteria( CV_TERMCRIT_EPS+CV_TERMCRIT_ITER, 30, 0.1 ));
-
-    // Generate positions of chessboard corners with top-left corner at (0,0,0)
-    std::vector<cv::Point3d> worldPoints;
-    for (int r = 0; r < camProps.boardSize.height; ++r)
-      for (int c = 0; c < camProps.boardSize.width; ++c)
-        worldPoints.push_back(cv::Point3d(c*camProps.squareSize, r*camProps.squareSize, 0.0));
-
-    // Perform pose estimation (origin w.r.t. webcam)
-    cv::Mat w_R_o;
-    cv::Mat w_p_o;
-    cv::solvePnP(worldPoints, imgPoints, camProps.cameraMat, cv::Mat::zeros(4,1,CV_32F),
-                 w_R_o, w_p_o, false, cv::EPNP);
-
-    OgreCV::updateOgreCameraFromCVExtrinsics(w_R_o, w_p_o, cam);
-  }
 }
 
 int main(int argc, char** argv)
@@ -180,10 +149,10 @@ int main(int argc, char** argv)
   while (!done)
   {
     webcam >> webcamImg;
-    cv::undistort(webcamImg, undistortedImg, camProps.cameraMat, camProps.distCoeffs);
+    camProps.undistort(webcamImg, undistortedImg);
     bg.updateFromCVImg(undistortedImg);
 
-    updateCameraPositionFromChessboard(undistortedImg, camProps, cam);
+    camProps.updateOgreCameraFromCheckerboardImg(undistortedImg, cv::Point3d(0.0,0.0,0.0), OgreCV::PLUS_Y, OgreCV::PLUS_X, cam);
 	  root->renderOneFrame();
     SDL_GL_SwapWindow(window);
 	
