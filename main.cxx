@@ -13,129 +13,37 @@
 
 #include <opencv2/opencv.hpp>
 
-struct CameraProperties
+#include "OgreBackground.h"
+#include "OgreCVCamera.h"
+
+void initScene(const std::string& sceneMgrName, Ogre::Camera* camera, OgreCV::OgreBackground* bg, const OgreCV::WebcamProperties& camProps)
 {
-  int w;
-  int h;
-  cv::Mat cameraMat;
-  cv::Mat distCoeffs;
-  cv::Size boardSize;
-  double squareSize;
-};
-
-struct WebcamBackground
-{
-  cv::VideoCapture* webcam;
-  CameraProperties properties;
-  Ogre::TexturePtr tex;
-  Ogre::MaterialPtr mat;
-  Ogre::Rectangle2D* rect;
-};
-
-CameraProperties loadCameraProperties(const std::string& cameraFilename)
-{
-  CameraProperties prop;
-
-  // Load in relevant data from file
-  cv::FileStorage fs(cameraFilename, cv::FileStorage::READ);
-  if (!fs.isOpened())
-    throw std::runtime_error("Error in opening camera file!");
-  fs["image_width"] >> prop.w;
-  fs["image_height"] >> prop.h;
-  fs["camera_matrix"] >> prop.cameraMat;
-  fs["distortion_coefficients"] >> prop.distCoeffs;
-  fs["board_width"] >> prop.boardSize.width;
-  fs["board_height"] >> prop.boardSize.height;
-  fs["square_size"] >> prop.squareSize;
-  fs.release();
-
-  return prop;
-}
-
-WebcamBackground createWebcamBackground(int camHandle, const CameraProperties& camProperties)
-{
-  cv::VideoCapture* webcam = new cv::VideoCapture(camHandle);
-  if (!webcam->isOpened())
-    throw std::runtime_error("Error in opening webcam!");
-
-	webcam->set(CV_CAP_PROP_FRAME_WIDTH, camProperties.w);
-	webcam->set(CV_CAP_PROP_FRAME_HEIGHT, camProperties.h);
-
-  // Create the texture
-	Ogre::TexturePtr tex = Ogre::TextureManager::getSingleton().createManual(
-		"WebcamTexture", // name
-		Ogre::ResourceGroupManager::DEFAULT_RESOURCE_GROUP_NAME,
-		Ogre::TEX_TYPE_2D,      // type
-		camProperties.w, camProperties.h,         // width & height
-		0,                // number of mipmaps
-		Ogre::PF_BYTE_BGRA,     // pixel format
-		Ogre::TU_DYNAMIC_WRITE_ONLY_DISCARDABLE);      // usage; should be TU_DYNAMIC_WRITE_ONLY_DISCARDABLE for
-												// textures updated very often (e.g. each frame)
-
-  // ---------------------- Zero-out background texture ---------------
-  Ogre::HardwarePixelBufferSharedPtr pixelBuffer = tex->getBuffer();
-	pixelBuffer->lock(Ogre::HardwareBuffer::HBL_DISCARD); // for best performance use HBL_DISCARD!
-	const Ogre::PixelBox& pixelBox = pixelBuffer->getCurrentLock();
-  Ogre::uint8* pDest = static_cast<Ogre::uint8*>(pixelBox.data);
-  for (int i = 0; i < camProperties.h; ++i)
-    for (int j = 0; j < camProperties.w; ++j)
-      for (int k = 0; k < 4; ++k)
-        *pDest++ = 0;
-  pixelBuffer->unlock();
-
-	// Create a material using the texture
-	Ogre::MaterialPtr mat = Ogre::MaterialManager::getSingleton().create(
-		"WebcamBackgroundMaterial", // name
-		Ogre::ResourceGroupManager::DEFAULT_RESOURCE_GROUP_NAME);
- 
-	mat->getTechnique(0)->getPass(0)->createTextureUnitState("WebcamTexture");
-	mat->getTechnique(0)->getPass(0)->setDepthCheckEnabled(false);
-	mat->getTechnique(0)->getPass(0)->setDepthWriteEnabled(false);
-	mat->getTechnique(0)->getPass(0)->setLightingEnabled(false);
-
-  Ogre::Rectangle2D* rect = new Ogre::Rectangle2D(true);
-	rect->setCorners(-1.0, 1.0, 1.0, -1.0);
-	rect->setMaterial("WebcamBackgroundMaterial");
- 
-	// Render the background before everything else
-	rect->setRenderQueueGroup(Ogre::RENDER_QUEUE_BACKGROUND);
- 
-	// Use infinite AAB to always stay visible
-	Ogre::AxisAlignedBox aabInf;
-	aabInf.setInfinite();
-	rect->setBoundingBox(aabInf);
-
-  WebcamBackground bg = {webcam, camProperties, tex, mat, rect};
-  return bg;
-}
-
-Ogre::Camera* initScene(const WebcamBackground& bg)
-{
-  Ogre::SceneManager* sceneMgr = Ogre::Root::getSingleton().createSceneManager(Ogre::ST_EXTERIOR_CLOSE, "SceneMgr");
-
-  // Create a camera with default pose (to be changed using pose estimation)
-  // TODO set the FOVY according to data read from camera file
-  Ogre::Camera* camera = sceneMgr->createCamera("cam");
-  camera->setPosition(1.0, 0.0, 0.0);
-  camera->lookAt(0.0, 0.0, 0.0);
-  camera->setNearClipDistance(0.001f);
-  camera->setFOVy(Ogre::Radian(2.0*atan(0.5 * bg.properties.h / bg.properties.cameraMat.at<double>(1,1))));
-
   Ogre::RenderTarget* renderTarget = Ogre::Root::getSingleton().getRenderTarget("OGRE Window");
   renderTarget->addViewport(camera);
 
+  Ogre::SceneManager* sceneMgr = Ogre::Root::getSingleton().getSceneManager(sceneMgrName);
+
   // Add background rectangle to scene
   Ogre::SceneNode* node = sceneMgr->getRootSceneNode()->createChildSceneNode("Background");
-  node->attachObject(bg.rect);
+  node->attachObject(bg->getRect());
+
+  Ogre::MaterialPtr boxMaterial = Ogre::MaterialManager::getSingleton().create("box_material",
+                                                                               Ogre::ResourceGroupManager::DEFAULT_RESOURCE_GROUP_NAME);
+  boxMaterial->getTechnique(0)->getPass(0)->setSceneBlending(Ogre::SBT_TRANSPARENT_ALPHA);
+  boxMaterial->getTechnique(0)->getPass(0)->setDepthWriteEnabled(false);
+  boxMaterial->getTechnique(0)->getPass(0)->setDiffuse(0.5, 0.5, 0.5, 0.5);
+  boxMaterial->getTechnique(0)->getPass(0)->setAmbient(0.2, 0.2, 0.2);
 
   // Add prop cube to scene
   Ogre::Entity* cube = sceneMgr->createEntity("Cube", Ogre::SceneManager::PT_CUBE);
+  cube->setMaterial(boxMaterial);
   node = sceneMgr->getRootSceneNode()->createChildSceneNode("Cube", Ogre::Vector3::ZERO);
   node->attachObject(cube);
-  float offset = bg.properties.squareSize / 2.0;
-  node->scale(0.01f * bg.properties.squareSize * Ogre::Vector3::UNIT_SCALE);
-  node->translate(offset + 6*bg.properties.squareSize, offset + 4*bg.properties.squareSize, -offset);
-  //node->translate(offset, 0.18f - offset, -0.13f + offset);
+  float offset = camProps.squareSize / 2.0;
+  node->scale(0.01f * camProps.squareSize * Ogre::Vector3::UNIT_SCALE);
+  node->translate(offset, offset, -offset);
+  //node->translate(offset + 6*bg.properties.squareSize, offset + 4*bg.properties.squareSize, -offset);
+  //node->translate(offset, 0.195f - offset, -0.23f + offset);
   //node->scale(0.01f * 0.03f * Ogre::Vector3::UNIT_SCALE);
 
   // Lights
@@ -150,89 +58,34 @@ Ogre::Camera* initScene(const WebcamBackground& bg)
   light->setType(Ogre::Light::LightTypes::LT_POINT);
   light->setPosition(-1.0f, 0.0f, -1.0f);
   light->setDiffuseColour(1.0f, 1.0f, 1.0f);
-
-  return camera;
 }
 
-void updateBackgroundFromWebcam(WebcamBackground* bg, cv::Mat* undistortedImg)
-{
-  cv::Mat rawImg;
-  (*bg->webcam) >> rawImg;
-
-  cv::undistort(rawImg, *undistortedImg, bg->properties.cameraMat, bg->properties.distCoeffs);
-  /**undistortedImg = rawImg;*/
-  
-	Ogre::HardwarePixelBufferSharedPtr pixelBuffer = bg->tex->getBuffer();
-	pixelBuffer->lock(Ogre::HardwareBuffer::HBL_DISCARD); // for best performance use HBL_DISCARD!
-	const Ogre::PixelBox& pixelBox = pixelBuffer->getCurrentLock();
-	Ogre::uint8* pDest = static_cast<Ogre::uint8*>(pixelBox.data);
-	Ogre::uint8* pSrc = static_cast<Ogre::uint8*>(undistortedImg->data);
-	for (size_t r = 0; r < bg->properties.h; ++r)
-	{
-    for (size_t c = 0; c < bg->properties.w; ++c)
-    {
-			*pDest++ = *pSrc++; // B
-			*pDest++ = *pSrc++; // G
-			*pDest++ = *pSrc++; // R
-			*pDest++ = 255; // A
-		} 
-		pDest += pixelBox.getRowSkip() * Ogre::PixelUtil::getNumElemBytes(pixelBox.format);
-	}
-	pixelBuffer->unlock();
-}
-
-void updateCameraPositionFromChessboard(const WebcamBackground& bg, const cv::Mat& img, Ogre::Camera* cam)
+void updateCameraPositionFromChessboard(const cv::Mat& undistortedImg, const OgreCV::WebcamProperties& camProps, Ogre::Camera* cam)
 {
   std::vector<cv::Point2f> imgPoints;
-  bool chessboardFound = cv::findChessboardCorners(img, bg.properties.boardSize, imgPoints,
+  bool chessboardFound = cv::findChessboardCorners(undistortedImg, camProps.boardSize, imgPoints,
                                                    CV_CALIB_CB_ADAPTIVE_THRESH | CV_CALIB_CB_FAST_CHECK | CV_CALIB_CB_NORMALIZE_IMAGE);
   if (chessboardFound)
   {
     // Improve accuracy
     cv::Mat viewGray;
-    cv::cvtColor(img, viewGray, cv::COLOR_BGR2GRAY);
+    cv::cvtColor(undistortedImg, viewGray, cv::COLOR_BGR2GRAY);
     cv::cornerSubPix(viewGray, imgPoints, cv::Size(11,11),
                      cv::Size(-1,-1), cv::TermCriteria( CV_TERMCRIT_EPS+CV_TERMCRIT_ITER, 30, 0.1 ));
 
     // Generate positions of chessboard corners with top-left corner at (0,0,0)
     std::vector<cv::Point3d> worldPoints;
-    for (int r = 0; r < bg.properties.boardSize.height; ++r)
-      for (int c = 0; c < bg.properties.boardSize.width; ++c)
-        worldPoints.push_back(cv::Point3d(c*bg.properties.squareSize, r*bg.properties.squareSize, 0.0));
+    for (int r = 0; r < camProps.boardSize.height; ++r)
+      for (int c = 0; c < camProps.boardSize.width; ++c)
+        worldPoints.push_back(cv::Point3d(c*camProps.squareSize, r*camProps.squareSize, 0.0));
 
     // Perform pose estimation (origin w.r.t. webcam)
     cv::Mat w_R_o;
     cv::Mat w_p_o;
-    cv::solvePnP(worldPoints, imgPoints, bg.properties.cameraMat, cv::Mat::zeros(4,1,CV_32F),
+    cv::solvePnP(worldPoints, imgPoints, camProps.cameraMat, cv::Mat::zeros(4,1,CV_32F),
                  w_R_o, w_p_o, false, cv::EPNP);
 
-    // Get the inverse transformation (webcam w.r.t. origin)
-    cv::Mat o_R_w;
-    cv::Rodrigues(w_R_o, o_R_w);
-    o_R_w = o_R_w.t();
-    cv::Mat o_p_w = -o_R_w*w_p_o;
-
-    // convert to Ogre transformation matrix
-    Ogre::Matrix4 o_T_w = Ogre::Matrix4::IDENTITY;
-    for (int i = 0; i < 3; ++i)
-      for (int j = 0; j < 3; ++j)
-        o_T_w[i][j] = (Ogre::Real) o_R_w.at<double>(i,j);
-    for (int i = 0; i < 3; ++i)
-      o_T_w[i][3] = (Ogre::Real) o_p_w.at<double>(i,0);
-
-    // Transformation matrix for Ogre camera w.r.t. webcam
-    // Just a 180 degree rotation about x-axis
-    Ogre::Matrix4 w_T_c = Ogre::Matrix4::IDENTITY;
-    w_T_c[1][1] = -1.0;
-    w_T_c[2][2] = -1.0;
-
-    // Transformation matrix for Ogre camera w.r.t. origin
-    Ogre::Matrix4 o_T_c = o_T_w * w_T_c;
-
-    std::cout << o_T_c << std::endl;
-
-    cam->setOrientation(o_T_c.extractQuaternion());
-    cam->setPosition(o_T_c.getTrans());
+    OgreCV::updateOgreCameraFromCVExtrinsics(w_R_o, w_p_o, cam);
   }
 }
 
@@ -305,27 +158,32 @@ int main(int argc, char** argv)
 
 	ogreWindow->setVisible(true);
 	
-  CameraProperties camProps;
-  WebcamBackground bg;
-  Ogre::Camera* camera;
-  try
-  {
-    camProps = loadCameraProperties("cam.xml");
-    bg = createWebcamBackground(0, camProps);
-    camera = initScene(bg);
-  }
-  catch (std::exception& e)
-  {
-    std::cout << e.what() << std::endl;
-    return 1;
-  }
+  OgreCV::WebcamProperties camProps("out_camera_data.xml");
+  OgreCV::OgreBackground bg(camProps.w, camProps.h);
+
+  std::string sceneMgrName("SceneMgr");
+  Ogre::Root::getSingleton().createSceneManager(Ogre::ST_EXTERIOR_CLOSE, sceneMgrName);
+  Ogre::Camera* cam = camProps.generateOgreCamera("camera", sceneMgrName);
+  initScene(sceneMgrName, cam, &bg, camProps);
+
+  cv::VideoCapture webcam(0);
+  if (!webcam.isOpened())
+    throw std::runtime_error("Error in opening webcam!");
+
+	webcam.set(CV_CAP_PROP_FRAME_WIDTH, camProps.w);
+	webcam.set(CV_CAP_PROP_FRAME_HEIGHT, camProps.h);
+
   cv::Mat webcamImg;
+  cv::Mat undistortedImg;
 
   bool done = false;
   while (!done)
   {
-    updateBackgroundFromWebcam(&bg, &webcamImg);
-    updateCameraPositionFromChessboard(bg, webcamImg, camera);
+    webcam >> webcamImg;
+    cv::undistort(webcamImg, undistortedImg, camProps.cameraMat, camProps.distCoeffs);
+    bg.updateFromCVImg(undistortedImg);
+
+    updateCameraPositionFromChessboard(undistortedImg, camProps, cam);
 	  root->renderOneFrame();
     SDL_GL_SwapWindow(window);
 	
@@ -338,7 +196,6 @@ int main(int argc, char** argv)
   }
 
 	delete root;
-  delete bg.webcam;
 
   // Close and destroy the window
   SDL_DestroyWindow(window); 
